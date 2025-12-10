@@ -9,8 +9,6 @@ yarn.lock
 .node_repl_history
 
 # Credentials and tokens
-credentials.json
-token.json
 .env
 
 # IDE
