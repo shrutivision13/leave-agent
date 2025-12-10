@@ -1,0 +1,34 @@
+{
+  "name": "ai-leave-request-agent",
+  "version": "1.0.0",
+  "description": "AI Agent that monitors Gmail for leave request replies and sends real-time desktop notifications",
+  "main": "server.js", 
+  "type": "module",
+  "scripts": {
+    "start": "node leaveAgent.js",
+    "start:continuous": "nodemon leaveAgent.js --continuous",
+    "test:notification": "node testNotification.js",
+    "api": "node server.js",
+    "dev:api": "nodemon server.js"
+  },
+  "keywords": [
+    "gmail",
+    "automation",
+    "ai-agent",
+    "leave-request"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "googleapis": "^128.0.0",
+    "node-notifier": "^10.0.1",
+    "mongodb": "^6.4.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}
