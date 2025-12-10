@@ -18,12 +18,13 @@ export class LeaveRequestAgent {
     }
     
     async initialize() {
-        /** Initialize Gmail client (async initialization). */
+        /** Initialize Gmail client and notification service (async initialization). */
         if (!this.gmailClient) {
             const { GmailClient } = await import('./gmailClient.js');
             this.gmailClient = new GmailClient();
         }
         await this.gmailClient._authenticate();
+        await this.notificationService.initialize();
     }
     
     async runOnce() {

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { getAuthUrl, fetchUsers, runCheck } from './api.js';
+import { getAuthUrl, fetchUsers, runCheck, testNotification, registerFCMToken } from './api.js';
+import { requestFCMToken, onForegroundMessage } from './firebase.js';
 
 function useQueryParam(key) {
   const [value, setValue] = useState(() => {
@@ -21,6 +22,10 @@ export default function App() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
+  const [fcmToken, setFcmToken] = useState(null);
+  const [fcmSupported, setFcmSupported] = useState(true);
   const connectedEmail = useQueryParam('email');
 
   const loadUsers = useCallback(async () => {
@@ -37,7 +42,54 @@ export default function App() {
 
   useEffect(() => {
     loadUsers();
+    setupNotifications();
   }, [loadUsers]);
+
+  const setupNotifications = useCallback(async () => {
+    try {
+      // Request notification permission
+      if (Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+      }
+
+      // Setup FCM
+      if (Notification.permission === 'granted') {
+        try {
+          const token = await requestFCMToken();
+          setFcmToken(token);
+          
+          // Register token with backend
+          await registerFCMToken(token);
+          console.log('FCM token registered with backend');
+          
+          // Listen for foreground messages
+          const unsubscribe = onForegroundMessage((payload) => {
+            console.log('Foreground FCM message:', payload);
+            
+            // Add to notifications list
+            const notification = {
+              type: payload.data?.type || 'fcm',
+              title: payload.notification?.title || 'Notification',
+              message: payload.notification?.body || '',
+              timestamp: new Date().toISOString(),
+              data: payload.data
+            };
+            
+            setNotifications(prev => [notification, ...prev.slice(0, 9)]);
+          });
+          
+          return unsubscribe;
+        } catch (error) {
+          console.error('FCM setup failed:', error);
+          setFcmSupported(false);
+        }
+      }
+    } catch (error) {
+      console.error('Notification setup failed:', error);
+      setFcmSupported(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (connectedEmail) {
@@ -74,6 +126,24 @@ export default function App() {
     }
   };
 
+  const handleTestNotification = async () => {
+    try {
+      await testNotification();
+      setSuccess('Test notification sent!');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const requestNotificationPermission = async () => {
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    
+    if (permission === 'granted') {
+      await setupNotifications();
+    }
+  };
+
   return (
     <div className="app">
       <header>
@@ -103,12 +173,52 @@ export default function App() {
       </section>
 
       <section className="card">
+        <h2>Push Notifications</h2>
+        {!fcmSupported && (
+          <p className="error">Push notifications are not supported in this environment.</p>
+        )}
+        {fcmSupported && notificationPermission === 'default' && (
+          <div>
+            <p>Enable push notifications to receive alerts.</p>
+            <button onClick={requestNotificationPermission}>Enable Push Notifications</button>
+          </div>
+        )}
+        {fcmSupported && notificationPermission === 'denied' && (
+          <p className="error">Notifications are blocked. Please enable them in your browser settings.</p>
+        )}
+        {fcmSupported && notificationPermission === 'granted' && (
+          <div>
+            <p className="success">✓ Push notifications enabled</p>
+            {fcmToken && <p className="success">✓ FCM token registered</p>}
+            <button onClick={handleTestNotification}>Test Notification</button>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
         <h2>Run Check</h2>
-        <p>Runs a single scan for pending replies and triggers desktop notifications.</p>
+        <p>Runs a single scan for pending replies and triggers notifications.</p>
         <button onClick={handleCheck} disabled={loading || !selectedUser}>
           {loading ? 'Checking...' : 'Run Now'}
         </button>
       </section>
+
+      {notifications.length > 0 && (
+        <section className="card">
+          <h2>Recent Notifications</h2>
+          <div className="notifications">
+            {notifications.map((notif, index) => (
+              <div key={index} className={`notification ${notif.type}`}>
+                <div className="notification-title">{notif.title}</div>
+                <div className="notification-message">{notif.message}</div>
+                <div className="notification-time">
+                  {new Date(notif.timestamp).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {error && <div className="alert error">{error}</div>}
       {success && <div className="alert success">{success}</div>}
