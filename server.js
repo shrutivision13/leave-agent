@@ -9,10 +9,14 @@ import { generateAuthUrl, handleAuthCallback, getAuthorizedClient } from './auth
 import { listUsers } from './db.js';
 import { LeaveRequestAgent } from './leaveAgent.js';
 import { GmailClient } from './gmailClient.js';
+import { NotificationService } from './notificationService.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Initialize notification service
+const notificationService = new NotificationService();
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -73,8 +77,45 @@ app.post('/api/check', async (req, res) => {
         }
         const gmailClient = new GmailClient(auth);
         const agent = new LeaveRequestAgent(gmailClient);
+        // Pass notification service to agent
+        agent.notificationService = notificationService;
         const results = await agent.runOnce();
         res.json({ results });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Server-Sent Events for real-time notifications
+app.get('/api/notifications/stream', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+    });
+    
+    // Add client to notification service
+    notificationService.addWebClient(res);
+    
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to notifications' })}\n\n`);
+});
+
+// Get recent notifications
+app.get('/api/notifications', (req, res) => {
+    const limit = parseInt(req.query.limit) || 10;
+    const notifications = notificationService.getRecentNotifications(limit);
+    res.json({ notifications });
+});
+
+// Test notification endpoint
+app.post('/api/notifications/test', async (req, res) => {
+    try {
+        const success = await notificationService.testNotification();
+        res.json({ success });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
@@ -99,6 +140,8 @@ cron.schedule(cronExpr, async () => {
                 }
                 const gmailClient = new GmailClient(auth);
                 const agent = new LeaveRequestAgent(gmailClient);
+                // Pass notification service to agent
+                agent.notificationService = notificationService;
                 await agent.runOnce();
             } catch (err) {
                 console.error(`[Scheduler] Error for ${userEmail}:`, err.message);

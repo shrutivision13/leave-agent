@@ -1,19 +1,39 @@
 /**
- * Real-time desktop notification service using node-notifier.
- * Provides cross-platform desktop notifications for leave request alerts.
+ * Notification service that works in both development and production.
+ * Uses desktop notifications locally and web notifications in production.
  */
 import notifier from 'node-notifier';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export class NotificationService {
-    /** Service for sending desktop notifications. */
+    /** Service for sending notifications (desktop locally, web in production). */
     
     constructor() {
         this.notifier = notifier;
+        this.isProduction = process.env.NODE_ENV === 'production';
+        this.webNotifications = []; // Store notifications for web clients
+        this.webClients = new Set(); // Store connected web clients
+    }
+    
+    // Add method to register web clients (for SSE)
+    addWebClient(res) {
+        this.webClients.add(res);
+        
+        // Remove client when connection closes
+        res.on('close', () => {
+            this.webClients.delete(res);
+        });
+    }
+    
+    // Send notification to all connected web clients
+    sendToWebClients(notification) {
+        this.webClients.forEach(client => {
+            try {
+                client.write(`data: ${JSON.stringify(notification)}\n\n`);
+            } catch (error) {
+                // Remove disconnected clients
+                this.webClients.delete(client);
+            }
+        });
     }
     
     /**
@@ -42,37 +62,59 @@ export class NotificationService {
         // Truncate subject if too long
         const title = subject.length > 60 ? subject.substring(0, 57) + '...' : subject;
         
-        try {
-            await new Promise((resolve, reject) => {
-                this.notifier.notify(
-                    {
-                        title: '⚠ Leave Request - No Reply',
-                        message: message,
-                        subtitle: title,
-                        sound: true, // Play system sound
-                        wait: false, // Don't wait for callback
-                        timeout: 10, // Notification timeout in seconds
-                        icon: null, // Use default system icon
-                        // Windows specific options
-                        appID: 'AI Leave Request Agent',
-                        // macOS specific options
-                        appName: 'AI Leave Request Agent',
-                    },
-                    (err, response) => {
-                        if (err) {
-                            reject(err);
-                        } else {
-                            resolve(response);
-                        }
-                    }
-                );
-            });
-            
-            console.log('   ✓ Desktop notification sent');
+        const notification = {
+            type: 'leave_request',
+            title: '⚠ Leave Request - No Reply',
+            message: message,
+            subject: title,
+            timestamp: new Date().toISOString(),
+            data: {
+                subject,
+                emailDate,
+                hoursOld: hoursOld.toFixed(1),
+                daysOld,
+                recipientEmail
+            }
+        };
+        
+        if (this.isProduction) {
+            // Send to web clients in production
+            this.webNotifications.push(notification);
+            this.sendToWebClients(notification);
+            console.log('   ✓ Web notification sent');
             return true;
-        } catch (error) {
-            console.error('   ✗ Failed to send desktop notification:', error.message);
-            return false;
+        } else {
+            // Use desktop notifications in development
+            try {
+                await new Promise((resolve, reject) => {
+                    this.notifier.notify(
+                        {
+                            title: '⚠ Leave Request - No Reply',
+                            message: message,
+                            subtitle: title,
+                            sound: true,
+                            wait: false,
+                            timeout: 10,
+                            icon: null,
+                            appID: 'AI Leave Request Agent',
+                            appName: 'AI Leave Request Agent',
+                        },
+                        (err, response) => {
+                            if (err) {
+                                reject(err);
+                            } else {
+                                resolve(response);
+                            }
+                        }
+                    );
+                });
+                
+                console.log('   ✓ Desktop notification sent');
+                return true;
+            } catch (error) {
+                console.error('   ✗ Failed to send desktop notification:', error.message);
+                return false;
+            }
         }
     }
     
@@ -91,32 +133,48 @@ export class NotificationService {
             ? 'You have 1 leave request pending reply.'
             : `You have ${count} leave requests pending replies.`;
         
-        try {
-            await new Promise((resolve, reject) => {
-                this.notifier.notify(
-                    {
-                        title: '📧 Leave Request Summary',
-                        message: message,
-                        sound: true,
-                        wait: false,
-                        timeout: 5,
-                        appID: 'AI Leave Request Agent',
-                        appName: 'AI Leave Request Agent',
-                    },
-                    (err, response) => {
-                        if (err) {
-                            reject(err);
-                        } else {
-                            resolve(response);
-                        }
-                    }
-                );
-            });
-            
+        const notification = {
+            type: 'summary',
+            title: '📧 Leave Request Summary',
+            message: message,
+            timestamp: new Date().toISOString(),
+            data: { count }
+        };
+        
+        if (this.isProduction) {
+            // Send to web clients in production
+            this.webNotifications.push(notification);
+            this.sendToWebClients(notification);
             return true;
-        } catch (error) {
-            console.error('Failed to send summary notification:', error.message);
-            return false;
+        } else {
+            // Use desktop notifications in development
+            try {
+                await new Promise((resolve, reject) => {
+                    this.notifier.notify(
+                        {
+                            title: '📧 Leave Request Summary',
+                            message: message,
+                            sound: true,
+                            wait: false,
+                            timeout: 5,
+                            appID: 'AI Leave Request Agent',
+                            appName: 'AI Leave Request Agent',
+                        },
+                        (err, response) => {
+                            if (err) {
+                                reject(err);
+                            } else {
+                                resolve(response);
+                            }
+                        }
+                    );
+                });
+                
+                return true;
+            } catch (error) {
+                console.error('Failed to send summary notification:', error.message);
+                return false;
+            }
         }
     }
     
@@ -126,34 +184,54 @@ export class NotificationService {
      * @returns {Promise<boolean>} True if test notification sent successfully
      */
     async testNotification() {
-        try {
-            await new Promise((resolve, reject) => {
-                this.notifier.notify(
-                    {
-                        title: '✅ Notification Test',
-                        message: 'Desktop notifications are working correctly!',
-                        sound: true,
-                        wait: false,
-                        timeout: 5,
-                        appID: 'AI Leave Request Agent',
-                        appName: 'AI Leave Request Agent',
-                    },
-                    (err, response) => {
-                        if (err) {
-                            reject(err);
-                        } else {
-                            resolve(response);
-                        }
-                    }
-                );
-            });
-            
-            console.log('✓ Test notification sent successfully');
+        const notification = {
+            type: 'test',
+            title: '✅ Notification Test',
+            message: 'Notifications are working correctly!',
+            timestamp: new Date().toISOString()
+        };
+        
+        if (this.isProduction) {
+            // Send to web clients in production
+            this.sendToWebClients(notification);
+            console.log('✓ Test web notification sent successfully');
             return true;
-        } catch (error) {
-            console.error('✗ Failed to send test notification:', error.message);
-            return false;
+        } else {
+            // Use desktop notifications in development
+            try {
+                await new Promise((resolve, reject) => {
+                    this.notifier.notify(
+                        {
+                            title: '✅ Notification Test',
+                            message: 'Desktop notifications are working correctly!',
+                            sound: true,
+                            wait: false,
+                            timeout: 5,
+                            appID: 'AI Leave Request Agent',
+                            appName: 'AI Leave Request Agent',
+                        },
+                        (err, response) => {
+                            if (err) {
+                                reject(err);
+                            } else {
+                                resolve(response);
+                            }
+                        }
+                    );
+                });
+                
+                console.log('✓ Test desktop notification sent successfully');
+                return true;
+            } catch (error) {
+                console.error('✗ Failed to send test notification:', error.message);
+                return false;
+            }
         }
+    }
+    
+    // Get recent notifications for web clients
+    getRecentNotifications(limit = 10) {
+        return this.webNotifications.slice(-limit);
     }
 }
 
