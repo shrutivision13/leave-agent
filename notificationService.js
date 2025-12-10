@@ -1,39 +1,43 @@
 /**
  * Notification service that works in both development and production.
- * Uses desktop notifications locally and web notifications in production.
+ * Uses desktop notifications locally and FCM push notifications in production.
  */
 import notifier from 'node-notifier';
+import { FirebaseService } from './firebaseService.js';
 
 export class NotificationService {
-    /** Service for sending notifications (desktop locally, web in production). */
+    /** Service for sending notifications (desktop locally, FCM in production). */
     
     constructor() {
         this.notifier = notifier;
         this.isProduction = process.env.NODE_ENV === 'production';
-        this.webNotifications = []; // Store notifications for web clients
-        this.webClients = new Set(); // Store connected web clients
+        this.firebaseService = new FirebaseService();
+        this.initialized = false;
     }
     
-    // Add method to register web clients (for SSE)
-    addWebClient(res) {
-        this.webClients.add(res);
-        
-        // Remove client when connection closes
-        res.on('close', () => {
-            this.webClients.delete(res);
-        });
+    async initialize() {
+        if (this.isProduction) {
+            console.log('Production environment detected, initializing FCM...');
+            this.initialized = await this.firebaseService.initialize();
+        } else {
+            console.log('Development environment detected, using desktop notifications');
+            this.initialized = true;
+        }
+        return this.initialized;
     }
     
-    // Send notification to all connected web clients
-    sendToWebClients(notification) {
-        this.webClients.forEach(client => {
-            try {
-                client.write(`data: ${JSON.stringify(notification)}\n\n`);
-            } catch (error) {
-                // Remove disconnected clients
-                this.webClients.delete(client);
-            }
-        });
+    // Register FCM token from frontend
+    registerFCMToken(token) {
+        if (this.isProduction && this.initialized) {
+            this.firebaseService.addFCMToken(token);
+        }
+    }
+    
+    // Unregister FCM token
+    unregisterFCMToken(token) {
+        if (this.isProduction && this.initialized) {
+            this.firebaseService.removeFCMToken(token);
+        }
     }
     
     /**
@@ -47,44 +51,26 @@ export class NotificationService {
      * @returns {Promise<boolean>} True if notification sent successfully
      */
     async notifyPendingLeaveRequest(request, hoursOld, recipientEmail = null) {
-        const subject = request.subject || 'No Subject';
-        const emailDate = request.date || 'Unknown';
-        const daysOld = (hoursOld / 24).toFixed(1);
-        
-        // Format notification message
-        let message = `Sent: ${emailDate}\n`;
-        message += `Age: ${daysOld} days (${hoursOld.toFixed(1)} hours)`;
-        if (recipientEmail) {
-            message += `\nTo: ${recipientEmail}`;
-        }
-        message += '\n\n⚠ Action Required: Follow up on this leave request';
-        
-        // Truncate subject if too long
-        const title = subject.length > 60 ? subject.substring(0, 57) + '...' : subject;
-        
-        const notification = {
-            type: 'leave_request',
-            title: '⚠ Leave Request - No Reply',
-            message: message,
-            subject: title,
-            timestamp: new Date().toISOString(),
-            data: {
-                subject,
-                emailDate,
-                hoursOld: hoursOld.toFixed(1),
-                daysOld,
-                recipientEmail
-            }
-        };
-        
-        if (this.isProduction) {
-            // Send to web clients in production
-            this.webNotifications.push(notification);
-            this.sendToWebClients(notification);
-            console.log('   ✓ Web notification sent');
-            return true;
+        if (this.isProduction && this.initialized) {
+            // Use FCM push notifications in production
+            return await this.firebaseService.sendLeaveRequestNotification(request, hoursOld, recipientEmail);
         } else {
             // Use desktop notifications in development
+            const subject = request.subject || 'No Subject';
+            const emailDate = request.date || 'Unknown';
+            const daysOld = (hoursOld / 24).toFixed(1);
+            
+            // Format notification message
+            let message = `Sent: ${emailDate}\n`;
+            message += `Age: ${daysOld} days (${hoursOld.toFixed(1)} hours)`;
+            if (recipientEmail) {
+                message += `\nTo: ${recipientEmail}`;
+            }
+            message += '\n\n⚠ Action Required: Follow up on this leave request';
+            
+            // Truncate subject if too long
+            const title = subject.length > 60 ? subject.substring(0, 57) + '...' : subject;
+            
             try {
                 await new Promise((resolve, reject) => {
                     this.notifier.notify(
@@ -129,25 +115,15 @@ export class NotificationService {
             return true; // No notification needed
         }
         
-        const message = count === 1 
-            ? 'You have 1 leave request pending reply.'
-            : `You have ${count} leave requests pending replies.`;
-        
-        const notification = {
-            type: 'summary',
-            title: '📧 Leave Request Summary',
-            message: message,
-            timestamp: new Date().toISOString(),
-            data: { count }
-        };
-        
-        if (this.isProduction) {
-            // Send to web clients in production
-            this.webNotifications.push(notification);
-            this.sendToWebClients(notification);
-            return true;
+        if (this.isProduction && this.initialized) {
+            // Use FCM push notifications in production
+            return await this.firebaseService.sendSummaryNotification(count);
         } else {
             // Use desktop notifications in development
+            const message = count === 1 
+                ? 'You have 1 leave request pending reply.'
+                : `You have ${count} leave requests pending replies.`;
+            
             try {
                 await new Promise((resolve, reject) => {
                     this.notifier.notify(
@@ -184,18 +160,9 @@ export class NotificationService {
      * @returns {Promise<boolean>} True if test notification sent successfully
      */
     async testNotification() {
-        const notification = {
-            type: 'test',
-            title: '✅ Notification Test',
-            message: 'Notifications are working correctly!',
-            timestamp: new Date().toISOString()
-        };
-        
-        if (this.isProduction) {
-            // Send to web clients in production
-            this.sendToWebClients(notification);
-            console.log('✓ Test web notification sent successfully');
-            return true;
+        if (this.isProduction && this.initialized) {
+            // Use FCM push notifications in production
+            return await this.firebaseService.sendTestNotification();
         } else {
             // Use desktop notifications in development
             try {
@@ -227,11 +194,6 @@ export class NotificationService {
                 return false;
             }
         }
-    }
-    
-    // Get recent notifications for web clients
-    getRecentNotifications(limit = 10) {
-        return this.webNotifications.slice(-limit);
     }
 }
 
