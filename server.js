@@ -17,6 +17,7 @@ app.use(express.json());
 
 // Initialize notification service
 const notificationService = new NotificationService();
+notificationService.initialize();
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -87,28 +88,26 @@ app.post('/api/check', async (req, res) => {
     }
 });
 
-// Server-Sent Events for real-time notifications
-app.get('/api/notifications/stream', (req, res) => {
-    res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
-    });
+// Register FCM token
+app.post('/api/notifications/register', (req, res) => {
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+        return res.status(400).json({ error: 'FCM token required' });
+    }
     
-    // Add client to notification service
-    notificationService.addWebClient(res);
-    
-    // Send initial connection message
-    res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to notifications' })}\n\n`);
+    notificationService.registerFCMToken(fcmToken);
+    res.json({ success: true, message: 'FCM token registered' });
 });
 
-// Get recent notifications
-app.get('/api/notifications', (req, res) => {
-    const limit = parseInt(req.query.limit) || 10;
-    const notifications = notificationService.getRecentNotifications(limit);
-    res.json({ notifications });
+// Unregister FCM token
+app.post('/api/notifications/unregister', (req, res) => {
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+        return res.status(400).json({ error: 'FCM token required' });
+    }
+    
+    notificationService.unregisterFCMToken(fcmToken);
+    res.json({ success: true, message: 'FCM token unregistered' });
 });
 
 // Test notification endpoint
