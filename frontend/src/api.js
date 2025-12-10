@@ -26,3 +26,41 @@ export async function runCheck(userEmail) {
   return res.json();
 }
 
+export async function testNotification() {
+  const res = await fetch(`${API_BASE}/notifications/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to send test notification');
+  }
+  return res.json();
+}
+
+export async function registerFCMToken(fcmToken) {
+  const res = await fetch(`${API_BASE}/notifications/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fcmToken })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to register FCM token');
+  }
+  return res.json();
+}
+
+export async function unregisterFCMToken(fcmToken) {
+  const res = await fetch(`${API_BASE}/notifications/unregister`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fcmToken })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to unregister FCM token');
+  }
+  return res.json();
+}
+
